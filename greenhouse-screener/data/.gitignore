@@ -1,0 +1,2 @@
+# Ignore embedding index files (generated locally)
+embeddings/
