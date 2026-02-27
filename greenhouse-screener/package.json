@@ -6,15 +6,16 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
-    "build": "tsc && vite build",
+    "build": "vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
-    "start": "node dist/server/index.js"
+    "start": "node dist-server/index.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
     "@radix-ui/react-checkbox": "^1.0.4",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-popover": "^1.0.7",
+    "@radix-ui/react-progress": "^1.1.8",
     "@radix-ui/react-select": "^2.0.0",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-tabs": "^1.0.4",

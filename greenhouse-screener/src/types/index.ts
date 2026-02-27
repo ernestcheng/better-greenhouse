@@ -141,7 +141,6 @@ export interface Filters {
   status?: 'active' | 'rejected' | 'hired';
   stage_id?: number;
   screening?: 'all' | 'green' | 'red' | 'unscreened';
-  sort?: 'applied_at' | 'name' | 'screening';
 }
 
 // Screening History

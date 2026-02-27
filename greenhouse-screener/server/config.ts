@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 
 config();
 
+// Mutable config that can be updated at runtime
 export const CONFIG = {
   PORT: parseInt(process.env.PORT || '3333', 10),
   GREENHOUSE_API_KEY: process.env.GREENHOUSE_API_KEY || '',
@@ -14,6 +15,23 @@ export const CONFIG = {
   DEFAULT_FROM_EMAIL: "no-reply@hightouch.io",
 };
 
+// Update config at runtime (called when settings are saved)
+export function updateConfig(settings: {
+  greenhouseApiKey?: string;
+  greenhouseUserId?: string;
+  anthropicApiKey?: string;
+}): void {
+  if (settings.greenhouseApiKey) {
+    CONFIG.GREENHOUSE_API_KEY = settings.greenhouseApiKey;
+  }
+  if (settings.greenhouseUserId) {
+    CONFIG.GREENHOUSE_USER_ID = settings.greenhouseUserId;
+  }
+  if (settings.anthropicApiKey) {
+    CONFIG.ANTHROPIC_API_KEY = settings.anthropicApiKey;
+  }
+}
+
 export function validateConfig() {
   const missing: string[] = [];
   
@@ -23,7 +41,7 @@ export function validateConfig() {
   
   if (missing.length > 0) {
     console.warn(`⚠️  Missing environment variables: ${missing.join(', ')}`);
-    console.warn('   Create a .env file based on .env.example');
+    console.warn('   Configure in Settings or create a .env file');
   }
   
   return missing.length === 0;

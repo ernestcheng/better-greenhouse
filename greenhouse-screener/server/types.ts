@@ -38,6 +38,28 @@ export interface GreenhouseApplication {
     answer: string;
   }>;
   jobs: Array<{ id: number; name: string }>;
+  // These fields are returned by the API but were previously fetched from /candidates
+  candidate?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+  };
+  attachments?: Array<{
+    filename: string;
+    url: string;
+    type: string;
+  }>;
+}
+
+// Lightweight application for export/indexing (no candidate enrichment needed)
+export interface LightweightApplication {
+  id: number;
+  candidate_id: number;
+  candidate_name: string;
+  current_stage: { id: number; name: string } | null;
+  resume_url?: string;
+  cover_letter_url?: string;
+  answers: Array<{ question: string; answer: string }>;
 }
 
 export interface GreenhouseRejectionReason {
@@ -108,4 +130,16 @@ export interface ScreeningResult {
   key_factors: string[];
   concerns: string[];
   reasoning: string;
+}
+
+// Highlights Types - simplified output for easy navigation
+export interface HighlightedCandidate {
+  rank: number;
+  application_id: number;
+  candidate_id: number;
+  candidate_name: string;
+  greenhouse_url: string;
+  score: number;
+  summary: string;
+  tier: 'TOP' | 'STRONG' | 'GOOD';
 }

@@ -1,26 +1,34 @@
 import { useState } from 'react';
-import { Search, Database, Loader2, X, AlertCircle } from 'lucide-react';
+import { Search, Database, Loader2, X, AlertCircle, Download, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useEmbeddingStatus, useIndexStatus, useBuildIndex, useSearch } from '@/hooks/useSearch';
+import { useEmbeddingStatus, useIndexStatus, useSearch } from '@/hooks/useSearch';
+import { useQueryClient } from '@tanstack/react-query';
+import { ExportProgressDialog } from '@/components/ExportProgressDialog';
+import { IndexProgressDialog } from '@/components/IndexProgressDialog';
+import { HighlightsDialog } from '@/components/HighlightsDialog';
 import { cn } from '@/lib/utils';
 
 interface SearchBarProps {
   jobId: number | null;
+  jobRequirements?: string;
   onSearchResults: (results: Array<{ application_id: number; score: number }> | null) => void;
   isSearchActive: boolean;
 }
 
-export function SearchBar({ jobId, onSearchResults, isSearchActive }: SearchBarProps) {
+export function SearchBar({ jobId, jobRequirements = '', onSearchResults, isSearchActive }: SearchBarProps) {
   const [query, setQuery] = useState('');
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showIndexDialog, setShowIndexDialog] = useState(false);
+  const [showHighlightsDialog, setShowHighlightsDialog] = useState(false);
   
+  const queryClient = useQueryClient();
   const { data: embeddingStatus } = useEmbeddingStatus();
-  const { data: indexStatus } = useIndexStatus(jobId);
-  const { mutate: buildIndex, isPending: isIndexing } = useBuildIndex();
+  const { data: indexStatus, refetch: refetchIndexStatus } = useIndexStatus(jobId);
   const { mutate: search, isPending: isSearching } = useSearch(jobId);
 
   const handleSearch = () => {
@@ -57,9 +65,10 @@ export function SearchBar({ jobId, onSearchResults, isSearchActive }: SearchBarP
     }
   };
 
-  const handleBuildIndex = () => {
-    if (!jobId) return;
-    buildIndex(jobId);
+  const handleIndexComplete = () => {
+    // Refresh the index status after indexing completes
+    refetchIndexStatus();
+    queryClient.invalidateQueries({ queryKey: ['index-status', jobId] });
   };
 
   if (!jobId) return null;
@@ -120,21 +129,12 @@ export function SearchBar({ jobId, onSearchResults, isSearchActive }: SearchBarP
             <Button
               variant="outline"
               size="sm"
-              onClick={handleBuildIndex}
-              disabled={!embeddingAvailable || isIndexing}
+              onClick={() => setShowIndexDialog(true)}
+              disabled={!embeddingAvailable}
               className={cn("h-9", hasIndex && "border-green-300")}
             >
-              {isIndexing ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  Indexing...
-                </>
-              ) : (
-                <>
-                  <Database className="h-4 w-4 mr-1" />
-                  {hasIndex ? `${indexStatus.count} indexed` : 'Build Index'}
-                </>
-              )}
+              <Database className="h-4 w-4 mr-1" />
+              {hasIndex ? `${indexStatus.count} indexed` : 'Build Index'}
             </Button>
           </span>
         </TooltipTrigger>
@@ -154,6 +154,65 @@ export function SearchBar({ jobId, onSearchResults, isSearchActive }: SearchBarP
           )}
         </TooltipContent>
       </Tooltip>
+
+      {/* Export Button */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowExportDialog(true)}
+            className="h-9"
+          >
+            <Download className="h-4 w-4 mr-1" />
+            Export
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Export all resumes as JSON for LLM processing</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* AI Highlights Button */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowHighlightsDialog(true)}
+            className="h-9"
+          >
+            <Sparkles className="h-4 w-4 mr-1 text-yellow-500" />
+            AI Highlights
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>Use AI to find and rank the top 100 candidates</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Index Progress Dialog */}
+      <IndexProgressDialog
+        isOpen={showIndexDialog}
+        jobId={jobId}
+        onClose={() => setShowIndexDialog(false)}
+        onComplete={handleIndexComplete}
+      />
+
+      {/* Export Progress Dialog */}
+      <ExportProgressDialog
+        isOpen={showExportDialog}
+        jobId={jobId}
+        onClose={() => setShowExportDialog(false)}
+      />
+
+      {/* Highlights Dialog */}
+      <HighlightsDialog
+        isOpen={showHighlightsDialog}
+        jobId={jobId}
+        jobRequirements={jobRequirements}
+        onClose={() => setShowHighlightsDialog(false)}
+      />
     </div>
   );
 }

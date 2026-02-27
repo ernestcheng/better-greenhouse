@@ -7,11 +7,11 @@ import {
 } from '@/components/ui/tooltip';
 
 interface HeaderProps {
-  onSettingsClick?: () => void;
+  onGlobalSettingsClick?: () => void;
   onKeyboardShortcutsClick?: () => void;
 }
 
-export function Header({ onSettingsClick, onKeyboardShortcutsClick }: HeaderProps) {
+export function Header({ onGlobalSettingsClick, onKeyboardShortcutsClick }: HeaderProps) {
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between">
@@ -47,14 +47,14 @@ export function Header({ onSettingsClick, onKeyboardShortcutsClick }: HeaderProp
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={onSettingsClick}
+                onClick={onGlobalSettingsClick}
               >
                 <Settings className="h-4 w-4" />
-                <span className="sr-only">Settings</span>
+                <span className="sr-only">Global settings</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Screening settings</p>
+              <p>API keys & global settings</p>
             </TooltipContent>
           </Tooltip>
         </div>

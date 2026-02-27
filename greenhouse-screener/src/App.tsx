@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Settings } from 'lucide-react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Header } from '@/components/layout/Header';
 import { JobSelector } from '@/components/jobs/JobSelector';
 import { ApplicationTable } from '@/components/applications/ApplicationTable';
@@ -13,6 +16,7 @@ import { SearchBar } from '@/components/SearchBar';
 import { KeyboardShortcutsDialog } from '@/components/KeyboardShortcutsDialog';
 import { BulkRejectDialog } from '@/components/BulkRejectDialog';
 import { ScreeningSettingsDialog } from '@/components/ScreeningSettingsDialog';
+import { GlobalSettingsDialog } from '@/components/GlobalSettingsDialog';
 import { DisagreementDialog } from '@/components/DisagreementDialog';
 
 import { useJobs, useJobStages } from '@/hooks/useJobs';
@@ -44,7 +48,8 @@ function App() {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showBulkRejectDialog, setShowBulkRejectDialog] = useState(false);
-  const [showScreeningSettings, setShowScreeningSettings] = useState(false);
+  const [showRoleSettings, setShowRoleSettings] = useState(false);
+  const [showGlobalSettings, setShowGlobalSettings] = useState(false);
   
   // Persisted settings (load from localStorage)
   const [jobRequirements, setJobRequirements] = useState<Record<number, string>>(() => {
@@ -436,7 +441,7 @@ function App() {
       }
 
       // Don't handle shortcuts when dialogs are open (except Escape)
-      if ((showBulkRejectDialog || showScreeningSettings || showKeyboardShortcuts || pendingAction) && e.key !== 'Escape') {
+      if ((showBulkRejectDialog || showRoleSettings || showKeyboardShortcuts || pendingAction) && e.key !== 'Escape') {
         return;
       }
 
@@ -483,8 +488,8 @@ function App() {
             setShowKeyboardShortcuts(false);
           } else if (showBulkRejectDialog) {
             setShowBulkRejectDialog(false);
-          } else if (showScreeningSettings) {
-            setShowScreeningSettings(false);
+          } else if (showRoleSettings) {
+            setShowRoleSettings(false);
           } else if (selectedApplication) {
             setSelectedApplication(null);
           } else {
@@ -533,7 +538,7 @@ function App() {
           break;
         case ',':
           e.preventDefault();
-          setShowScreeningSettings(true);
+          setShowRoleSettings(true);
           break;
       }
     };
@@ -549,7 +554,7 @@ function App() {
     handleSingleReject,
     handleAdvance,
     showBulkRejectDialog,
-    showScreeningSettings,
+    showRoleSettings,
     showKeyboardShortcuts,
     pendingAction,
     currentPage,
@@ -562,11 +567,11 @@ function App() {
       <div className="min-h-screen bg-background">
         <Header
           onKeyboardShortcutsClick={() => setShowKeyboardShortcuts(true)}
-          onSettingsClick={() => setShowScreeningSettings(true)}
+          onGlobalSettingsClick={() => setShowGlobalSettings(true)}
         />
 
         <main className="container py-6 space-y-6">
-          {/* Job Selector */}
+          {/* Job Selector + Role Settings */}
           <div className="flex items-center gap-4">
             <JobSelector
               jobs={jobs}
@@ -578,12 +583,29 @@ function App() {
               }}
               isLoading={isLoadingJobs}
             />
+            {selectedJobId && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowRoleSettings(true)}
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Role screening settings</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
 
           {/* Semantic Search */}
           {selectedJobId && (
             <SearchBar
               jobId={selectedJobId}
+              jobRequirements={jobRequirements[selectedJobId] || ''}
               onSearchResults={setSearchResults}
               isSearchActive={searchResults !== null}
             />
@@ -667,8 +689,8 @@ function App() {
         />
 
         <ScreeningSettingsDialog
-          isOpen={showScreeningSettings}
-          onClose={() => setShowScreeningSettings(false)}
+          isOpen={showRoleSettings}
+          onClose={() => setShowRoleSettings(false)}
           jobRequirements={selectedJobId ? jobRequirements[selectedJobId] || '' : ''}
           rejectionSettings={rejectionSettings}
           onSave={(requirements, newRejectionSettings) => {
@@ -681,6 +703,11 @@ function App() {
             setRejectionSettings(newRejectionSettings);
           }}
           jobTitle={selectedJob?.name}
+        />
+
+        <GlobalSettingsDialog
+          isOpen={showGlobalSettings}
+          onClose={() => setShowGlobalSettings(false)}
         />
 
         <DisagreementDialog

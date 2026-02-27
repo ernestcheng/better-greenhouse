@@ -7,6 +7,7 @@ import type {
   GreenhouseRejectionReason,
   Job,
   Application,
+  LightweightApplication,
 } from '../types.js';
 
 // Helper to add delay
@@ -49,9 +50,11 @@ class GreenhouseAPI {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retries: number = 0
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
+    const maxRetries = 5;
     
     const response = await fetch(url, {
       ...options,
@@ -62,6 +65,14 @@ class GreenhouseAPI {
     });
 
     if (!response.ok) {
+      // Handle rate limiting with exponential backoff
+      if (response.status === 429 && retries < maxRetries) {
+        const backoffMs = Math.min(1000 * Math.pow(2, retries + 1), 30000);
+        console.log(`Rate limited (429) on ${endpoint}. Retry ${retries + 1}/${maxRetries} after ${backoffMs}ms...`);
+        await sleep(backoffMs);
+        return this.request<T>(endpoint, options, retries + 1);
+      }
+      
       const errorText = await response.text();
       throw new Error(`Greenhouse API error: ${response.status} - ${errorText}`);
     }
@@ -71,9 +82,11 @@ class GreenhouseAPI {
 
   private async requestWithHeaders<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retries: number = 0
   ): Promise<{ data: T; headers: Headers }> {
     const url = `${this.baseUrl}${endpoint}`;
+    const maxRetries = 5;
     
     const response = await fetch(url, {
       ...options,
@@ -84,6 +97,14 @@ class GreenhouseAPI {
     });
 
     if (!response.ok) {
+      // Handle rate limiting with exponential backoff
+      if (response.status === 429 && retries < maxRetries) {
+        const backoffMs = Math.min(1000 * Math.pow(2, retries + 1), 30000);
+        console.log(`Rate limited (429) on ${endpoint}. Retry ${retries + 1}/${maxRetries} after ${backoffMs}ms...`);
+        await sleep(backoffMs);
+        return this.requestWithHeaders<T>(endpoint, options, retries + 1);
+      }
+      
       const errorText = await response.text();
       throw new Error(`Greenhouse API error: ${response.status} - ${errorText}`);
     }
@@ -201,11 +222,66 @@ class GreenhouseAPI {
       ? enrichedApplications.filter(app => app.current_stage?.id === stage_id)
       : enrichedApplications;
 
+    // Sort by applied_at descending (newest first)
+    filtered.sort((a, b) => {
+      const dateA = a.applied_at ? new Date(a.applied_at).getTime() : 0;
+      const dateB = b.applied_at ? new Date(b.applied_at).getTime() : 0;
+      return dateB - dateA;
+    });
+
     console.log(`Fetched ${enrichedApplications.length}, filtered to ${filtered.length} for stage ${stage_id || 'all'}`);
 
     return {
       applications: filtered,
       total,
+    };
+  }
+
+  // Lightweight fetch for export/indexing - no candidate enrichment needed
+  // Uses attachments directly from the /applications endpoint (available since Sept 2020)
+  async getApplicationsLightweight(
+    jobId: number,
+    options: { page?: number; per_page?: number; status?: string } = {}
+  ): Promise<{ applications: LightweightApplication[]; hasMore: boolean }> {
+    const { page = 1, per_page = 100, status = 'active' } = options;
+    
+    const queryParams = new URLSearchParams({
+      job_id: jobId.toString(),
+      page: page.toString(),
+      per_page: per_page.toString(),
+      status,
+    });
+
+    const rawApplications = await this.request<GreenhouseApplication[]>(
+      `/applications?${queryParams}`
+    );
+
+    const applications: LightweightApplication[] = rawApplications.map(app => {
+      // Get candidate name from embedded candidate object or fall back to IDs
+      const firstName = app.candidate?.first_name || '';
+      const lastName = app.candidate?.last_name || '';
+      const candidateName = firstName || lastName 
+        ? `${firstName} ${lastName}`.trim()
+        : `Candidate ${app.candidate_id}`;
+
+      // Get attachments directly from application response
+      const resume = app.attachments?.find(a => a.type === 'resume');
+      const coverLetter = app.attachments?.find(a => a.type === 'cover_letter');
+
+      return {
+        id: app.id,
+        candidate_id: app.candidate_id,
+        candidate_name: candidateName,
+        current_stage: app.current_stage,
+        resume_url: resume?.url,
+        cover_letter_url: coverLetter?.url,
+        answers: app.answers || [],
+      };
+    });
+
+    return {
+      applications,
+      hasMore: rawApplications.length === per_page,
     };
   }
 

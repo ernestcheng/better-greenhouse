@@ -1,10 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import mammoth from 'mammoth';
 import { CONFIG } from '../config.js';
-import type { ScreeningRequest, ScreeningResult } from '../types.js';
+import type { ScreeningRequest, ScreeningResult, HighlightedCandidate } from '../types.js';
 
 const anthropic = new Anthropic({
   apiKey: CONFIG.ANTHROPIC_API_KEY,
+  timeout: 300000, // 5 minute timeout for large requests
+  maxRetries: 0, // We handle retries ourselves
 });
 
 const SYSTEM_PROMPT = `You are an extremely critical technical recruiter screening candidates for: {job_title}
@@ -277,7 +279,8 @@ export async function screenApplications(
   const appsWithDocs = await prepareApplicationDocs(request.applications);
 
   // Build content array with documents and text
-  const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
+  // Note: Using 'any' for content array because Anthropic SDK types may not include 'document' type yet
+  const content: any[] = [];
 
   for (const { application, resumeDoc, coverLetterDoc } of appsWithDocs) {
     // Add resume PDF document if available (only PDFs can be attached)
@@ -357,4 +360,300 @@ export async function screenApplications(
   }
 
   return results;
+}
+
+// ============================================================================
+// HIGHLIGHTS - Rank all candidates and return top N
+// ============================================================================
+
+const HIGHLIGHTS_SYSTEM_PROMPT = `You are an expert technical recruiter analyzing candidates for: {job_title}
+
+## Job Requirements
+{job_requirements}
+
+## Your Task
+I'm attaching a JSON file containing all candidate data (resumes and application answers).
+Analyze ALL candidates and identify the TOP {top_n} based on fit for this role.
+
+## Scoring (0-100)
+- 90-100: Exceptional, must interview
+- 80-89: Strong candidate
+- 70-79: Good candidate
+- Below 70: Don't include
+
+## Response Format
+Return JSON array ranked from best (#1) to #{top_n}:
+
+\`\`\`json
+[
+  {
+    "application_id": 12345,
+    "rank": 1,
+    "score": 95,
+    "summary": "Senior ML Engineer from Google, built recommendation systems at scale",
+    "tier": "TOP"
+  }
+]
+\`\`\`
+
+## Tiers
+- "TOP": Rank 1-10
+- "STRONG": Rank 11-25  
+- "GOOD": Rank 26+
+
+## Rules
+- Only include candidates scoring 70+
+- Be specific in summaries - companies, metrics, achievements
+- Maximum {top_n} candidates
+- Return valid JSON array`;
+
+export interface CandidateData {
+  application_id: number;
+  candidate_id: number;
+  candidate_name: string;
+  greenhouse_url: string;
+  resume_text: string;
+  answers: Array<{ question: string; answer: string }>;
+}
+
+export interface HighlightsInput {
+  job_title: string;
+  job_requirements: string;
+  candidates: CandidateData[];
+  top_n: number;
+  onBatchProgress?: (batch: number, totalBatches: number, winnersFound: number) => void;
+}
+
+// Retry wrapper for API calls
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  label: string = 'API call'
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const isConnectionError = 
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        error.message?.includes('Connection error') ||
+        error.message?.includes('socket hang up') ||
+        error.cause?.code === 'ECONNRESET';
+        
+      const isRetryable = 
+        error.status === 429 || // Rate limit
+        error.status === 500 || // Server error
+        error.status === 502 || // Bad gateway
+        error.status === 503 || // Service unavailable
+        isConnectionError;
+      
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+      
+      // Longer backoff for connection errors (might be server overload)
+      const baseBackoff = isConnectionError ? 5000 : 2000;
+      const backoffMs = Math.min(baseBackoff * Math.pow(2, attempt - 1), 60000);
+      console.log(`[Retry] ${label} failed (attempt ${attempt}/${maxRetries}), retrying in ${backoffMs / 1000}s...`);
+      console.log(`[Retry] Error type: ${isConnectionError ? 'connection' : 'api'}, message: ${error.message || error}`);
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+  
+  throw lastError;
+}
+
+// Process a single batch of candidates and return winners
+async function processBatch(
+  candidates: CandidateData[],
+  jobTitle: string,
+  jobRequirements: string,
+  winnersPerBatch: number,
+  batchNum: number,
+  totalBatches: number
+): Promise<Array<{ application_id: number; score: number; summary: string }>> {
+  const systemPrompt = `You are an expert technical recruiter analyzing candidates for: ${jobTitle}
+
+## Job Requirements
+${jobRequirements || 'General technical role'}
+
+## Your Task
+This is batch ${batchNum} of ${totalBatches}. Analyze these candidates and identify the TOP ${winnersPerBatch} from this batch.
+
+## Response Format
+Return JSON array of winners with scores (0-100):
+
+\`\`\`json
+[
+  {
+    "application_id": 12345,
+    "score": 95,
+    "summary": "Senior ML Engineer from Google, built recommendation systems at scale"
+  }
+]
+\`\`\`
+
+## Rules
+- Only include candidates scoring 70+
+- Maximum ${winnersPerBatch} candidates
+- Be specific in summaries
+- Return valid JSON array`;
+
+  // Build candidate text
+  let candidateText = '';
+  for (const c of candidates) {
+    candidateText += `\n---\n### ${c.candidate_name} (ID: ${c.application_id})\n`;
+    candidateText += c.resume_text || 'No resume';
+    if (c.answers?.length) {
+      candidateText += `\nAnswers: ${c.answers.slice(0, 3).map(a => `${a.question}: ${a.answer}`).join('; ')}`;
+    }
+  }
+
+  const response = await withRetry(
+    () => anthropic.messages.create({
+      model: 'claude-opus-4-5-20251101',
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Analyze these ${candidates.length} candidates:\n${candidateText}\n\nReturn top ${winnersPerBatch} as JSON.` }],
+    }),
+    3,
+    `Batch ${batchNum}/${totalBatches}`
+  );
+
+  const textContent = response.content.find((c) => c.type === 'text');
+  if (!textContent || textContent.type !== 'text') return [];
+
+  try {
+    const jsonMatch = textContent.text.match(/```(?:json)?\n?([\s\S]*?)```/);
+    const jsonContent = jsonMatch ? jsonMatch[1] : textContent.text;
+    const parsed = JSON.parse(jsonContent.trim());
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    console.warn(`[Highlights] Failed to parse batch ${batchNum} response`);
+    return [];
+  }
+}
+
+// Final ranking of all winners using Opus
+async function rankWinners(
+  winners: Array<{ application_id: number; score: number; summary: string; candidate: CandidateData }>,
+  jobTitle: string,
+  jobRequirements: string,
+  topN: number
+): Promise<HighlightedCandidate[]> {
+  const systemPrompt = HIGHLIGHTS_SYSTEM_PROMPT
+    .replace('{job_title}', jobTitle)
+    .replace('{job_requirements}', jobRequirements || 'General technical role')
+    .replace(/\{top_n\}/g, topN.toString());
+
+  // Build winner text with full details
+  // Limit resume length based on number of winners to stay under token limits
+  const maxResumePerWinner = Math.min(3000, Math.floor(500000 / winners.length));
+  console.log(`[Highlights] Max ${maxResumePerWinner} chars per resume for ${winners.length} winners`);
+  
+  let winnerText = '';
+  for (const w of winners) {
+    winnerText += `\n---\n### ${w.candidate.candidate_name} (ID: ${w.application_id})\n`;
+    winnerText += `Previous Score: ${w.score}\n`;
+    winnerText += `Summary: ${w.summary}\n`;
+    const resumeText = w.candidate.resume_text?.substring(0, maxResumePerWinner) || 'No resume';
+    winnerText += `Resume: ${resumeText}`;
+  }
+
+  const userContent = `Rank these ${winners.length} pre-screened candidates:\n${winnerText}\n\nReturn top ${topN} ranked.`;
+  
+  console.log(`[Highlights] Final ranking of ${winners.length} winners with Opus 4.5...`);
+  console.log(`[Highlights] Request size: system=${systemPrompt.length} chars, user=${userContent.length} chars, total=${(systemPrompt.length + userContent.length) / 1024} KB`);
+
+  const response = await withRetry(
+    () => anthropic.messages.create({
+      model: 'claude-opus-4-5-20251101',
+      max_tokens: 16000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+    5, // More retries for the final ranking
+    'Final ranking'
+  );
+
+  console.log(`[Highlights] Opus response: ${response.usage.input_tokens} in, ${response.usage.output_tokens} out`);
+
+  const textContent = response.content.find((c) => c.type === 'text');
+  if (!textContent || textContent.type !== 'text') {
+    throw new Error('No text in Claude response');
+  }
+
+  const jsonMatch = textContent.text.match(/```(?:json)?\n?([\s\S]*?)```/);
+  const jsonContent = jsonMatch ? jsonMatch[1] : textContent.text;
+  const parsed = JSON.parse(jsonContent.trim());
+
+  if (!Array.isArray(parsed)) throw new Error('Expected array');
+
+  // Build lookup for candidate info
+  const candidateMap = new Map(winners.map(w => [w.application_id, w.candidate]));
+
+  return parsed.map((item: any) => {
+    const candidate = candidateMap.get(Number(item.application_id));
+    return {
+      rank: Number(item.rank),
+      application_id: Number(item.application_id),
+      candidate_id: candidate?.candidate_id || 0,
+      candidate_name: candidate?.candidate_name || 'Unknown',
+      greenhouse_url: candidate?.greenhouse_url || '',
+      score: Number(item.score),
+      summary: String(item.summary || ''),
+      tier: (['TOP', 'STRONG', 'GOOD'].includes(item.tier) ? item.tier : 'GOOD') as 'TOP' | 'STRONG' | 'GOOD',
+    };
+  }).sort((a: HighlightedCandidate, b: HighlightedCandidate) => a.rank - b.rank);
+}
+
+export async function generateHighlights(input: HighlightsInput): Promise<HighlightedCandidate[]> {
+  const { candidates, job_title, job_requirements, top_n, onBatchProgress } = input;
+  
+  // Batch size: ~100 candidates per batch to fit in context
+  const BATCH_SIZE = 100;
+  const numBatches = Math.ceil(candidates.length / BATCH_SIZE);
+  const winnersPerBatch = Math.ceil((top_n * 1.5) / numBatches); // Get 1.5x winners to have buffer
+  
+  console.log(`[Highlights] Processing ${candidates.length} candidates in ${numBatches} batches, ${winnersPerBatch} winners/batch`);
+  
+  // Phase 1: Process batches to find winners
+  const allWinners: Array<{ application_id: number; score: number; summary: string; candidate: CandidateData }> = [];
+  
+  for (let i = 0; i < numBatches; i++) {
+    const batchStart = i * BATCH_SIZE;
+    const batch = candidates.slice(batchStart, batchStart + BATCH_SIZE);
+    
+    console.log(`[Highlights] Processing batch ${i + 1}/${numBatches} (${batch.length} candidates)...`);
+    
+    const batchWinners = await processBatch(batch, job_title, job_requirements, winnersPerBatch, i + 1, numBatches);
+    
+    // Enrich winners with full candidate data
+    const candidateMap = new Map(batch.map(c => [c.application_id, c]));
+    for (const winner of batchWinners) {
+      const candidate = candidateMap.get(winner.application_id);
+      if (candidate) {
+        allWinners.push({ ...winner, candidate });
+      }
+    }
+    
+    console.log(`[Highlights] Batch ${i + 1}: found ${batchWinners.length} winners (total: ${allWinners.length})`);
+    onBatchProgress?.(i + 1, numBatches, allWinners.length);
+  }
+  
+  if (allWinners.length === 0) {
+    console.log('[Highlights] No winners found in any batch');
+    return [];
+  }
+  
+  // Phase 2: Final ranking with Opus
+  console.log(`[Highlights] Final ranking of ${allWinners.length} winners...`);
+  const finalRanking = await rankWinners(allWinners, job_title, job_requirements, top_n);
+  
+  console.log(`[Highlights] Complete: ${finalRanking.length} top candidates`);
+  return finalRanking;
 }

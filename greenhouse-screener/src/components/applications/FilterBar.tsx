@@ -1,4 +1,4 @@
-import { Filter, SortAsc } from 'lucide-react';
+import { Filter } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -47,33 +47,9 @@ export function FilterBar({
         </SelectContent>
       </Select>
 
-      {/* Sort */}
-      <div className="flex items-center gap-2 ml-auto text-sm text-muted-foreground">
-        <SortAsc className="h-4 w-4" />
-        <span>Sort:</span>
-      </div>
-      <Select
-        value={filters.sort || 'applied_at'}
-        onValueChange={(value) =>
-          onFiltersChange({
-            ...filters,
-            sort: value as Filters['sort'],
-          })
-        }
-      >
-        <SelectTrigger className="w-[140px] h-8 text-sm">
-          <SelectValue placeholder="Sort by" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="applied_at">Applied Date</SelectItem>
-          <SelectItem value="name">Name</SelectItem>
-          <SelectItem value="screening">Screening</SelectItem>
-        </SelectContent>
-      </Select>
-
       {/* Total Count */}
       {totalCount !== undefined && (
-        <span className="text-sm text-muted-foreground">
+        <span className="ml-auto text-sm text-muted-foreground">
           {totalCount} candidate{totalCount === 1 ? '' : 's'}
         </span>
       )}

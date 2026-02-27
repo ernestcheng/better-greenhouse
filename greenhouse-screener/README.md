@@ -112,6 +112,10 @@ greenhouse-screener/
 | `/api/search/index/:jobId` | GET | Get index status for a job |
 | `/api/search/index/:jobId` | POST | Build search index for a job |
 | `/api/search/:jobId` | POST | Semantic search candidates |
+| `/api/search/export/:jobId` | GET | Export all resumes as JSON |
+| `/api/settings` | GET | Get current settings (masked) |
+| `/api/settings` | POST | Save API credentials |
+| `/api/settings/validate` | POST | Validate API keys |
 
 ## License
 

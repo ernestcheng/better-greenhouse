@@ -6,6 +6,10 @@ import applicationsRouter from './routes/applications.js';
 import screeningRouter from './routes/screening.js';
 import attachmentsRouter from './routes/attachments.js';
 import searchRouter from './routes/search.js';
+import settingsRouter, { initializeFromSavedSettings } from './routes/settings.js';
+
+// Load saved settings before anything else
+initializeFromSavedSettings();
 
 const app = express();
 
@@ -19,6 +23,7 @@ app.use('/api', applicationsRouter);
 app.use('/api/screen', screeningRouter);
 app.use('/api/attachments', attachmentsRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/settings', settingsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

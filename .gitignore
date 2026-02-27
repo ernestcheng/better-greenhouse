@@ -1,3 +1,5 @@
 greenhouse-screener/node_modules/
 greenhouse-screener/.env
 greenhouse-screener/.cache/
+greenhouse-screener/data/settings.json
+greenhouse-screener/dist-server/

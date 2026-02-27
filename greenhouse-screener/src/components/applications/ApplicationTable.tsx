@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
@@ -238,12 +238,25 @@ export function ApplicationTable({
           {startIndex}–{endIndex} of {totalCount}
         </p>
         <div className="flex items-center gap-1">
+          {/* First page */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onPageChange(1)}
+            disabled={currentPage <= 1}
+            className="h-7 px-2"
+            title="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+          {/* Previous page */}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
             className="h-7 px-2"
+            title="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -272,14 +285,27 @@ export function ApplicationTable({
               );
             })}
           </div>
+          {/* Next page */}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}
             className="h-7 px-2"
+            title="Next page"
           >
             <ChevronRight className="h-4 w-4" />
+          </Button>
+          {/* Last page */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onPageChange(totalPages)}
+            disabled={currentPage >= totalPages}
+            className="h-7 px-2"
+            title="Last page"
+          >
+            <ChevronsRight className="h-4 w-4" />
           </Button>
         </div>
       </div>
